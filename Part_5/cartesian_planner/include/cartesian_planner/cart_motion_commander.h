@@ -48,5 +48,7 @@ public:
     Eigen::VectorXd get_joint_angles(void); 
     int plan_jspace_path_current_to_qgoal(Eigen::VectorXd q_des_vec);  
     bool cb_received_in_time(double max_wait_time);
+    void time_rescale_planned_trajectory(double time_scale_factor);
+    void set_arrival_time_planned_trajectory(double arrival_time);
 };
 #endif

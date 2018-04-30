@@ -4,6 +4,7 @@
 // this node subscribes to topic "lineseg_vertices", from which it receives 
 //geometry_msgs/Point points specifying two vertices of a line segment
 // each input ADDS to the current array of line segments (without deletions)
+//NOTE: ASSUMES RECEIVED POINTS ARE WITH RESPECT TO "WORLD" FRAME
 
 // To see the result, add a "Marker" display in rviz and subscribe to the marker topic "/lines_display"
 // Can test this display node with the test node: "lines_display_test_node"
@@ -51,7 +52,7 @@ void init_marker_vals(visualization_msgs::Marker &marker) {
 
 
 void linesegCB(const geometry_msgs::Polygon& vertices) {
-    ROS_DEBUG("got vertices");
+    //ROS_DEBUG("got vertices");
     geometry_msgs::Point32 vertex1,vertex2;
     vertex1 = vertices.points[0];
     vertex2 = vertices.points[1];

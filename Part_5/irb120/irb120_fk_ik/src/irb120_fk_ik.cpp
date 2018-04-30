@@ -2,6 +2,7 @@
 
 #include <irb120_fk_ik/irb120_kinematics.h>
 
+
 // function for use w/ both fwd and inv kin
 // NOTE: q must be q in DH coords!!  use q_vec(i) + DH_q_offsets(i)
 
@@ -71,9 +72,16 @@ Eigen::Matrix4d compute_A_of_DH(int i, double q_abb) {
     return A;
 }
 
-Irb120_fwd_solver::Irb120_fwd_solver() { //(const hand_s& hs, const atlas_frame& base_frame, double rot_ang) {
+Irb120_fwd_solver::Irb120_fwd_solver() { 
 
     ROS_INFO("fwd_solver constructor");
+}
+
+Eigen::MatrixXd Irb120_fwd_solver::jacobian(const Eigen::VectorXd& q_vec) {
+  Eigen::MatrixXd jacobian;
+// ... do some work here FINISH ME!
+  //jacobian = irb120_fwd_solver.jacobian(q_vec);
+  return jacobian;
 }
 
 /*  IN CASE WANT JACOBIAN LATER...
@@ -110,18 +118,34 @@ Eigen::MatrixXd irb120_hand_fwd_solver::get_Jacobian(const Vectorq6x1& q_vec) {
 
  */
 
+
+/*
+//return soln out to tool flange; would still need to account for tool transform for gripper
 Eigen::Affine3d Irb120_fwd_solver::fwd_kin_solve(const Vectorq6x1& q_vec) {
     Eigen::Matrix4d M;
     M = fwd_kin_solve_(q_vec);
     Eigen::Affine3d A(M);
     return A;
 }
+*/
+
 
 Eigen::Matrix4d Irb120_fwd_solver::get_wrist_frame() {
     return A_mat_products[4];
 }
 
-//return soln out to tool flange; would still need to account for tool transform for gripper
+//alternative fnc: accepts arg of type Eigen::VectorXd 
+Eigen::Affine3d Irb120_fwd_solver::fwd_kin_solve(const Eigen::VectorXd& q_vec) {
+    //ROS_INFO("called fwd_kin_solve...");
+    Eigen::Matrix4d M;
+    Vectorq6x1 q_vec_6x1;
+    for (int i=0;i<NJNTS;i++) 
+        q_vec_6x1[i] =  q_vec[i];
+    M = fwd_kin_solve_(q_vec);
+    Eigen::Affine3d A(M);
+    return A;
+}
+
 
 Eigen::Matrix4d Irb120_fwd_solver::fwd_kin_solve_(const Vectorq6x1& q_vec) {
     Eigen::Matrix4d A = Eigen::Matrix4d::Identity();
@@ -157,6 +181,16 @@ Irb120_IK_solver::Irb120_IK_solver() {
     L_forearm = sqrt(A2 * A2 + L3 * L3);
     
     phi_elbow=acos((A2*A2+L_forearm*L_forearm-L3*L3)/(2.0*A2*L_forearm));
+}
+
+int Irb120_IK_solver::ik_solve(Eigen::Affine3d const& desired_hand_pose,  std::vector<Eigen::VectorXd> &q_ik_solns) {
+    int nsolns =ik_solve(desired_hand_pose);
+    //q_ik_solns = q_solns_fit;
+    q_ik_solns.clear();
+    for (int i=0;i<nsolns;i++) {
+      q_ik_solns.push_back(q_solns_fit[i]);
+    }
+  return nsolns;
 }
 
 int Irb120_IK_solver::ik_solve(Eigen::Affine3d const& desired_hand_pose) {
@@ -453,4 +487,31 @@ bool Irb120_IK_solver::solve_spherical_wrist(Vectorq6x1 q_in,Eigen::Matrix3d R_d
     q_solns.push_back(q_soln);        
     return is_singular;
 }
+
+/*
+Eigen::Affine3d FwdSolver::fwd_kin_solve(Eigen::VectorXd const& q_vec) { // given vector of q angles, compute fwd kin
+ Eigen::Affine3d fwd_soln;
+
+ fwd_soln = irb120_fwd_solver.fwd_kin_solve(q_vec);
+ return fwd_soln;
+}
+
+Eigen::MatrixXd FwdSolver::jacobian(const Eigen::VectorXd& q_vec) {
+  Eigen::MatrixXd jacobian;
+// ... do some work here FINISH ME!
+  //jacobian = irb120_fwd_solver.jacobian(q_vec);
+  return jacobian;
+}
+
+IKSolver::IKSolver() {
+
+}
+
+int IKSolver::ik_solve(Eigen::Affine3d const& desired_hand_pose,  std::vector<Eigen::VectorXd> &q_ik_solns) {
+       // int ik_solve(Eigen::Affine3d const& desired_hand_pose,vector<Eigen::VectorXd> &q_ik_solns);
+  int nsolns = irb120_IK_solver.ik_solve(desired_hand_pose,  q_ik_solns);
+  return nsolns;
+}
+ * */
+
 
