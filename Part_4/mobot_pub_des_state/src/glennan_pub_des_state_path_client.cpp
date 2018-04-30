@@ -11,7 +11,98 @@
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <object_grabber/object_grabberAction.h>
+#include <actionlib/client/simple_action_client.h>
+#include <actionlib/client/terminal_state.h>
+#include <object_finder/objectFinderAction.h>
+
+#include <object_manipulation_properties/object_ID_codes.h>
+#include <Eigen/Eigen>
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
+#include <xform_utils/xform_utils.h>
+#include <object_manipulation_properties/object_ID_codes.h>
+#include<generic_gripper_services/genericGripperInterface.h>
 using namespace std;
+
+XformUtils xformUtils;
+geometry_msgs::PoseStamped g_perceived_object_pose;
+int g_found_object_code;
+geometry_msgs::PoseStamped object_pickup_poseStamped;
+geometry_msgs::PoseStamped object_dropoff_poseStamped;
+bool g_got_callback;
+actionlib::SimpleActionClient<object_grabber::object_grabberAction> *g_object_grabber_ac_ptr;
+int g_object_grabber_return_code;
+
+
+void objectGrabberDoneCb(const actionlib::SimpleClientGoalState& state,
+        const object_grabber::object_grabberResultConstPtr& result) {
+    ROS_INFO(" objectGrabberDoneCb: server responded with state [%s]", state.toString().c_str());
+    g_object_grabber_return_code = result->return_code;
+    ROS_INFO("got result output = %d; ", g_object_grabber_return_code);
+    g_got_callback=true; //flag that action server has called back
+}
+
+
+void move_to_waiting_pose() {
+        ROS_INFO("sending command to move to waiting pose");
+        g_got_callback=false; //reset callback-done flag
+        object_grabber::object_grabberGoal object_grabber_goal;
+        object_grabber_goal.action_code = object_grabber::object_grabberGoal::MOVE_TO_WAITING_POSE;
+        g_object_grabber_ac_ptr->sendGoal(object_grabber_goal, &objectGrabberDoneCb);
+}
+
+void grab_object(geometry_msgs::PoseStamped object_pickup_poseStamped) {
+    ROS_INFO("sending a grab-object command");
+    g_got_callback=false; //reset callback-done flag
+    object_grabber::object_grabberGoal object_grabber_goal;
+    object_grabber_goal.action_code = object_grabber::object_grabberGoal::GRAB_OBJECT; //specify the action to be performed 
+    object_grabber_goal.object_id = ObjectIdCodes::TOY_BLOCK_ID; // specify the object to manipulate                
+    object_grabber_goal.object_frame = object_pickup_poseStamped; //and the object's current pose
+    object_grabber_goal.grasp_option = object_grabber::object_grabberGoal::DEFAULT_GRASP_STRATEGY; //from above
+    object_grabber_goal.speed_factor = 1.0;
+    ROS_INFO("sending goal to grab object: ");
+    g_object_grabber_ac_ptr->sendGoal(object_grabber_goal, &objectGrabberDoneCb);
+}
+
+void   dropoff_object(geometry_msgs::PoseStamped object_dropoff_poseStamped) {
+    ROS_INFO("sending a dropoff-object command");
+    object_grabber::object_grabberGoal object_grabber_goal;
+    object_grabber_goal.action_code = object_grabber::object_grabberGoal::DROPOFF_OBJECT; //specify the action to be performed 
+    object_grabber_goal.object_id = ObjectIdCodes::TOY_BLOCK_ID; // specify the object to manipulate                
+    object_grabber_goal.object_frame = object_dropoff_poseStamped; //and the object's current pose
+    object_grabber_goal.grasp_option = object_grabber::object_grabberGoal::DEFAULT_GRASP_STRATEGY; //from above
+    object_grabber_goal.speed_factor = 1.0;
+    ROS_INFO("sending goal to dropoff object: ");
+    g_object_grabber_ac_ptr->sendGoal(object_grabber_goal, &objectGrabberDoneCb);
+} 
+
+
+void objectFinderDoneCb(const actionlib::SimpleClientGoalState& state,
+        const object_finder::objectFinderResultConstPtr& result) {
+    ROS_INFO(" objectFinderDoneCb: server responded with state [%s]", state.toString().c_str());
+    g_found_object_code=result->found_object_code;
+    ROS_INFO("got object code response = %d; ",g_found_object_code);
+    if (g_found_object_code==object_finder::objectFinderResult::OBJECT_CODE_NOT_RECOGNIZED) {
+        ROS_WARN("object code not recognized");
+    }
+    else if (g_found_object_code==object_finder::objectFinderResult::OBJECT_FOUND) {
+        ROS_INFO("found object!");
+         g_perceived_object_pose= result->object_pose;
+         ROS_INFO("got pose x,y,z = %f, %f, %f",g_perceived_object_pose.pose.position.x,
+                 g_perceived_object_pose.pose.position.y,
+                 g_perceived_object_pose.pose.position.z);
+
+         ROS_INFO("got quaternion x,y,z, w = %f, %f, %f, %f",g_perceived_object_pose.pose.orientation.x,
+                 g_perceived_object_pose.pose.orientation.y,
+                 g_perceived_object_pose.pose.orientation.z,
+                 g_perceived_object_pose.pose.orientation.w);
+         //g_pose_publisher->publish(g_perceived_object_pose);
+    }
+    else {
+        ROS_WARN("object not found!");
+    }
+}
 
 geometry_msgs::Quaternion convertPlanarPhi2Quaternion(double phi) {
     geometry_msgs::Quaternion quaternion;
@@ -45,6 +136,9 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "append_path_client");
     ros::NodeHandle n;
     ros::ServiceClient client = n.serviceClient<mobot_pub_des_state::path>("append_path_queue_service");
+    actionlib::SimpleActionClient<object_finder::objectFinderAction> object_finder_ac("object_finder_action_service", true);
+    actionlib::SimpleActionClient<object_grabber::object_grabberAction> object_grabber_ac("object_grabber_action_service", true);
+    g_object_grabber_ac_ptr = &object_grabber_ac; // make available to fncs
 
     geometry_msgs::Quaternion quat;
     ros::Subscriber des_state_subscriber= n.subscribe("/desState", 1, desStateCallback);
@@ -98,6 +192,92 @@ int main(int argc, char **argv) {
     }
     
     ROS_WARN("do manipulation here...");
+    ROS_INFO("waiting for server: ");
+    bool finder_server_exists = false;
+    while ((!finder_server_exists)&&(ros::ok())) {
+        finder_server_exists = object_finder_ac.waitForServer(ros::Duration(0.5)); // 
+        ros::spinOnce();
+        ros::Duration(0.5).sleep();
+        ROS_INFO("retrying...");
+    }
+    ROS_INFO("connected to object_finder action server"); // if here, then we connected to the server; 
+    //ros::Publisher pose_publisher = nh.advertise<geometry_msgs::PoseStamped>("triad_display_pose", 1, true); 
+    //g_pose_publisher = &pose_publisher;
+    object_finder::objectFinderGoal object_finder_goal;
+    //object_finder::objectFinderResult object_finder_result;
+
+    object_finder_goal.object_id = ObjectIdCodes::TABLE_SURFACE;
+    object_finder_goal.known_surface_ht = false; //require find table height
+    //object_finder_goal.object_id=object_finder::objectFinderGoal::COKE_CAN_UPRIGHT;
+    //object_finder_goal.object_id=object_finder::objectFinderGoal::TOY_BLOCK;
+    //object_finder_goal.known_surface_ht=true;
+    //object_finder_goal.known_surface_ht=false; //require find table height
+    //object_finder_goal.surface_ht = 0.05;
+    double surface_height;
+    ROS_INFO("sending goal: ");
+        object_finder_ac.sendGoal(object_finder_goal,&objectFinderDoneCb); 
+        
+        bool finished_before_timeout = object_finder_ac.waitForResult(ros::Duration(10.0));
+        //bool finished_before_timeout = action_client.waitForResult(); // wait forever...
+        if (!finished_before_timeout) {
+            ROS_WARN("giving up waiting on result ");
+        }
+        
+    if (g_found_object_code == object_finder::objectFinderResult::OBJECT_FOUND) {
+                        ROS_INFO("surface-finder success");
+                        surface_height = g_perceived_object_pose.pose.position.z; // table-top height, as found by object_finder 
+                        ROS_INFO("found table ht = %f",surface_height);   }
+    else {
+        ROS_WARN("did not find table height; quitting:");
+    }
+    //if here, then find block using known table height:
+    object_finder_goal.known_surface_ht = true;
+    object_finder_goal.surface_ht = surface_height;
+    ROS_INFO("using surface ht = %f",surface_height);        
+    object_finder_goal.object_id=ObjectIdCodes::TOY_BLOCK_ID;
+     ROS_INFO("sending goal to find TOY_BLOCK: ");
+        object_finder_ac.sendGoal(object_finder_goal,&objectFinderDoneCb); 
+        
+        finished_before_timeout = object_finder_ac.waitForResult(ros::Duration(10.0));
+        //bool finished_before_timeout = action_client.waitForResult(); // wait forever...
+        if (!finished_before_timeout) {
+            ROS_WARN("giving up waiting on result ");
+        }       
+        
+    if (g_found_object_code == object_finder::objectFinderResult::OBJECT_FOUND)   {
+        ROS_INFO("found object!");
+    }    
+    else {
+        ROS_WARN("object not found!:");
+    }
+
+    ROS_INFO("waiting for server: ");
+    bool grabber_server_exists = false;
+    while ((!grabber_server_exists)&&(ros::ok())) {
+        grabber_server_exists = object_grabber_ac.waitForServer(ros::Duration(0.5)); // 
+        ros::spinOnce();
+        ros::Duration(0.5).sleep();
+        ROS_INFO("retrying...");
+    }
+    ROS_INFO("connected to object_grabber action server"); // if here, then we connected to the server; 
+
+    //move to waiting pose
+    move_to_waiting_pose();
+    while(!g_got_callback) {
+        ROS_INFO("waiting on move...");
+        ros::Duration(0.5).sleep(); //could do something useful
+    }
+
+    object_pickup_poseStamped = g_perceived_object_pose;
+
+    grab_object(object_pickup_poseStamped);
+    while(!g_got_callback) {
+        ROS_INFO("waiting on grab...");
+        ros::Duration(0.5).sleep(); //could do something useful
+    }    
+
+
+
     ros::Duration(2.0).sleep();
     ROS_INFO("head home: ");
     
